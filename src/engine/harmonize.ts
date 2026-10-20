@@ -1,15 +1,23 @@
 import { Note, Scale } from 'tonal';
 import type { ProjectData, TrackData, NoteEvent } from './types';
 
-export function harmonizeProject(data: ProjectData): ProjectData {
-  const melodyTrack = data.tracks[0];
-  if (!melodyTrack || melodyTrack.notes.length === 0) return data;
+export function harmonizeProject(inputData: ProjectData): ProjectData {
+  const melodyTrack = inputData.tracks[0];
+  if (!melodyTrack || melodyTrack.notes.length === 0) {
+    console.warn('[Harmonize] No melody track or empty, skipping');
+    return inputData;
+  }
+
+  console.log('[Harmonize] Starting with', melodyTrack.notes.length, 'melody notes');
 
   const key = detectKey(melodyTrack.notes);
+  console.log('[Harmonize] Detected key:', key);
+
   const harmonyVoices = generate16VoiceHarmony(melodyTrack.notes, key);
+  console.log('[Harmonize] Generated', harmonyVoices.length, 'harmony voices');
 
   return {
-    ...data,
+    ...inputData,
     tracks: [
       { ...melodyTrack, name: '01_Melody', channel: 0 },
       ...harmonyVoices
@@ -18,21 +26,56 @@ export function harmonizeProject(data: ProjectData): ProjectData {
 }
 
 function detectKey(notes: NoteEvent[]): string {
-  // Obtener pitch classes de las notas en tiempos fuertes
-  const pitchClasses = notes
-    .filter(n => n.startTime % 1 === 0)
-    .map(n => Note.fromMidi(n.pitch));
-  
-  if (pitchClasses.length === 0) return 'C major';
+  try {
+    // Convertir notas MIDI a nombres de nota (ej: "C4", "D#3")
+    const noteNames: string[] = [];
+    
+    for (const note of notes) {
+      // Usar solo notas en tiempos fuertes (múltiplos de 1 beat)
+      if (Math.abs(note.startTime - Math.round(note.startTime)) < 0.01) {
+        const name = Note.fromMidi(note.pitch);
+        if (name && name !== '') {
+          noteNames.push(name);
+        }
+      }
+    }
 
-  const detected = Scale.detect(pitchClasses);
-  return (detected && detected.length > 0) ? detected[0] : 'C major';
+    // Si no hay notas en tiempos fuertes, usar todas
+    if (noteNames.length === 0) {
+      for (const note of notes.slice(0, 50)) {
+        const name = Note.fromMidi(note.pitch);
+        if (name && name !== '') {
+          noteNames.push(name);
+        }
+      }
+    }
+
+    if (noteNames.length === 0) {
+      console.warn('[Harmonize] No valid note names for key detection');
+      return 'C major';
+    }
+
+    console.log('[Harmonize] Notes for key detection:', noteNames.slice(0, 10));
+
+    // Scale.detect espera un array de strings de notas
+    const detected = Scale.detect(noteNames, { match: 'fit' });
+    console.log('[Harmonize] Scale detection results:', detected);
+
+    if (detected && detected.length > 0) {
+      return detected[0];
+    }
+
+    return 'C major';
+  } catch (err) {
+    console.error('[Harmonize] Key detection error:', err);
+    return 'C major';
+  }
 }
 
-// MOTOR DE 16 VOCES: Genera un arreglo polifónico denso y perfectamente voice-led.
+// MOTOR DE 16 VOCES
 function generate16VoiceHarmony(melody: NoteEvent[], key: string): TrackData[] {
   const voices: TrackData[] = [];
-  
+
   // Matriz de intervalos para 15 voces adicionales
   const intervalPatterns = [
     '3M', '5P', '7m', '9M', '11A', '13M',           // Voces 2-7
@@ -47,38 +90,71 @@ function generate16VoiceHarmony(melody: NoteEvent[], key: string): TrackData[] {
     const channel = trackId % 16;
 
     for (const note of melody) {
-      const noteName = Note.fromMidi(note.pitch);
-      
-      // Transponer la nota por el intervalo
-      const targetNoteName = Note.transpose(noteName, interval);
-      let targetMidi = Note.midi(targetNoteName);
-      
-      if (targetMidi === null) targetMidi = note.pitch;
-      
-      // Voice Leading: ajustar octava según el rango de la voz
-      if (v < 6 && targetMidi < 48) targetMidi += 12;
-      if (v >= 6 && v < 12) {
-        if (targetMidi < 60) targetMidi += 12;
-        if (targetMidi > 84) targetMidi -= 12;
+      try {
+        // Convertir MIDI a nombre de nota (ej: 60 → "C4")
+        const noteName = Note.fromMidi(note.pitch);
+        if (!noteName) {
+          voiceNotes.push({
+            ...note,
+            id: `h_${trackId}_${note.id}`,
+            track: trackId,
+            channel
+          });
+          continue;
+        }
+
+        // Transponer la nota por el intervalo
+        const transposed = Note.transpose(noteName, interval);
+        if (!transposed) {
+          voiceNotes.push({
+            ...note,
+            id: `h_${trackId}_${note.id}`,
+            track: trackId,
+            channel
+          });
+          continue;
+        }
+
+        // Convertir de vuelta a MIDI
+        let targetMidi = Note.midi(transposed);
+        if (targetMidi === null || targetMidi === undefined) {
+          targetMidi = note.pitch;
+        }
+
+        // Voice Leading: ajustar octava según el rango de la voz
+        if (v < 6 && targetMidi < 48) targetMidi += 12;
+        if (v >= 6 && v < 12) {
+          if (targetMidi < 60) targetMidi += 12;
+          if (targetMidi > 84) targetMidi -= 12;
+        }
+        if (v >= 12 && targetMidi < 72) targetMidi += 12;
+
+        // Clamp al rango MIDI válido
+        while (targetMidi > 127) targetMidi -= 12;
+        while (targetMidi < 0) targetMidi += 12;
+
+        // Dinámica escalonada
+        const velocityScale = Math.max(40, note.velocity - (v * 4));
+
+        voiceNotes.push({
+          id: `h_${trackId}_${note.id}`,
+          pitch: targetMidi,
+          velocity: velocityScale,
+          startTime: note.startTime,
+          duration: note.duration,
+          track: trackId,
+          channel: channel
+        });
+      } catch (err) {
+        console.error('[Harmonize] Error processing note:', note, err);
+        // Fallback: usar la nota original
+        voiceNotes.push({
+          ...note,
+          id: `h_${trackId}_${note.id}`,
+          track: trackId,
+          channel
+        });
       }
-      if (v >= 12 && targetMidi < 72) targetMidi += 12;
-
-      // Clamp al rango MIDI válido
-      while (targetMidi > 127) targetMidi -= 12;
-      while (targetMidi < 0) targetMidi += 12;
-
-      // Dinámica escalonada
-      const velocityScale = Math.max(40, note.velocity - (v * 4));
-
-      voiceNotes.push({
-        id: `h_${trackId}_${note.id}`,
-        pitch: targetMidi,
-        velocity: velocityScale,
-        startTime: note.startTime,
-        duration: note.duration,
-        track: trackId,
-        channel: channel
-      });
     }
 
     voices.push({
