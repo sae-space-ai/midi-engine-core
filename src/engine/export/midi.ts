@@ -16,10 +16,5 @@ export function exportToMidi(data: ProjectData): Buffer {
     }
     return events;
   });
-
-  const midiObj = {
-    header: { format: 1, numTracks: tracks.length, ticksPerBeat: 480 },
-    tracks
-  };
-  return Buffer.from(writeMidi(midiObj as any));
+  return Buffer.from(writeMidi({ header: { format: 1, numTracks: tracks.length, ticksPerBeat: 480 }, tracks } as any));
 }
