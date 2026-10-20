@@ -18,5 +18,6 @@ export interface TrackData {
 export interface ProjectData {
   tempo: number;
   timeSignature: [number, number];
+  ticksPerBeat: number;
   tracks: TrackData[];
 }

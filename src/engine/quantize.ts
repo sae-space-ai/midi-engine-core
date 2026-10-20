@@ -1,14 +1,14 @@
-import { ProjectData, NoteEvent } from './types';
+import type { ProjectData, NoteEvent } from './types';
 
-type GridDivision = 4 | 8 | 16 | 32;
-
-export function quantizeProject(data: ProjectData, division: GridDivision = 16): ProjectData {
+export function quantizeProject(data: ProjectData, division: 4 | 8 | 16 | 32 = 16): ProjectData {
   const gridStep = 1 / division;
-  const quantizedTracks = data.tracks.map(track => ({
-    ...track,
-    notes: quantizeNotes(track.notes, gridStep)
-  }));
-  return { ...data, tracks: quantizedTracks };
+  return {
+    ...data,
+    tracks: data.tracks.map(track => ({
+      ...track,
+      notes: quantizeNotes(track.notes, gridStep)
+    }))
+  };
 }
 
 function quantizeNotes(notes: NoteEvent[], gridStep: number): NoteEvent[] {
@@ -19,19 +19,22 @@ function quantizeNotes(notes: NoteEvent[], gridStep: number): NoteEvent[] {
   }));
 
   const resolved: NoteEvent[] = [];
-  const pitchTimelines: Map<number, { end: number }[]> = new Map();
+  const pitchTimelines = new Map<number, { end: number }[]>();
 
   for (const note of snapped) {
     const timeline = pitchTimelines.get(note.pitch) || [];
     const noteEnd = note.startTime + note.duration;
     const overlap = timeline.find(t => note.startTime < t.end);
+    
     if (overlap) {
-      note.duration = Math.max(gridStep, overlap.end - note.startTime); 
+      note.duration = Math.max(gridStep, overlap.end - note.startTime);
     }
+
     const cleanTimeline = timeline.filter(t => t.end <= note.startTime);
     cleanTimeline.push({ end: noteEnd });
     pitchTimelines.set(note.pitch, cleanTimeline);
     resolved.push(note);
   }
+
   return resolved.sort((a, b) => a.startTime - b.startTime);
 }

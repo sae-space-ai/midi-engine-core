@@ -13,6 +13,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@supabase/supabase-js": "^2.98.0",
     "@types/node": "^26.6.5",
+    "@vercel/node": "^25.0.0",
     "canvas-confetti": "^1.9.3",
     "date-fns": "^2.30.0",
     "fast-xml-parser": "^5.11.2",

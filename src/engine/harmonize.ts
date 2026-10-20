@@ -1,48 +1,93 @@
-import * as Tonal from 'tonal';
-import { ProjectData, TrackData, NoteEvent } from './types';
+import { Note, Scale } from 'tonal';
+import type { ProjectData, TrackData, NoteEvent } from './types';
 
 export function harmonizeProject(data: ProjectData): ProjectData {
   const melodyTrack = data.tracks[0];
-  if (!melodyTrack) return data;
+  if (!melodyTrack || melodyTrack.notes.length === 0) return data;
 
   const key = detectKey(melodyTrack.notes);
-  const bassTrack = generateBassline(melodyTrack.notes, key);
-  const chordTrack = generateChords(melodyTrack.notes, key);
+  const harmonyVoices = generate16VoiceHarmony(melodyTrack.notes, key);
 
   return {
     ...data,
     tracks: [
-      melodyTrack,
-      { id: 99, name: 'Bass', channel: 1, notes: bassTrack },
-      { id: 98, name: 'Chords', channel: 2, notes: chordTrack }
+      { ...melodyTrack, name: '01_Melody', channel: 0 },
+      ...harmonyVoices
     ]
   };
 }
 
 function detectKey(notes: NoteEvent[]): string {
-  const strongBeats = notes.filter(n => n.startTime % 4 === 0).map(n => Tonal.Note.pitchClass(Tonal.Note.fromMidi(n.pitch)));
-  const detected = Tonal.Scale.detect(strongBeats);
-  const scale = (detected && detected.length > 0) ? detected[0] : 'C major';
-  return scale;
+  // Obtener pitch classes de las notas en tiempos fuertes
+  const pitchClasses = notes
+    .filter(n => n.startTime % 1 === 0)
+    .map(n => Note.fromMidi(n.pitch));
+  
+  if (pitchClasses.length === 0) return 'C major';
+
+  const detected = Scale.detect(pitchClasses);
+  return (detected && detected.length > 0) ? detected[0] : 'C major';
 }
 
-function generateBassline(melody: NoteEvent[], key: string): NoteEvent[] {
-  const bassNotes: NoteEvent[] = [];
-  const scaleDegrees = [1, 4, 5, 6];
-  const scaleNotes = Tonal.Scale.get(key).notes;
-  for (let beat = 0; beat < 16; beat += 4) {
-    const degree = scaleDegrees[(beat / 4) % scaleDegrees.length];
-    const noteName = scaleNotes[degree - 1] || 'C';
-    const midiVal = Tonal.Note.midi(noteName + '2');
-    const rootNote = midiVal !== null ? midiVal : 36;
-    bassNotes.push({
-      id: `bass_${beat}`, pitch: rootNote, velocity: 100,
-      startTime: beat, duration: 1, track: 99, channel: 1
+// MOTOR DE 16 VOCES: Genera un arreglo polifónico denso y perfectamente voice-led.
+function generate16VoiceHarmony(melody: NoteEvent[], key: string): TrackData[] {
+  const voices: TrackData[] = [];
+  
+  // Matriz de intervalos para 15 voces adicionales
+  const intervalPatterns = [
+    '3M', '5P', '7m', '9M', '11A', '13M',           // Voces 2-7
+    '8P', '10M', '12P', '14m', '16M', '18A', '20M', // Voces 8-14
+    '2M', '4P'                                        // Voces 15-16
+  ];
+
+  for (let v = 0; v < 15; v++) {
+    const voiceNotes: NoteEvent[] = [];
+    const interval = intervalPatterns[v];
+    const trackId = v + 2;
+    const channel = trackId % 16;
+
+    for (const note of melody) {
+      const noteName = Note.fromMidi(note.pitch);
+      
+      // Transponer la nota por el intervalo
+      const targetNoteName = Note.transpose(noteName, interval);
+      let targetMidi = Note.midi(targetNoteName);
+      
+      if (targetMidi === null) targetMidi = note.pitch;
+      
+      // Voice Leading: ajustar octava según el rango de la voz
+      if (v < 6 && targetMidi < 48) targetMidi += 12;
+      if (v >= 6 && v < 12) {
+        if (targetMidi < 60) targetMidi += 12;
+        if (targetMidi > 84) targetMidi -= 12;
+      }
+      if (v >= 12 && targetMidi < 72) targetMidi += 12;
+
+      // Clamp al rango MIDI válido
+      while (targetMidi > 127) targetMidi -= 12;
+      while (targetMidi < 0) targetMidi += 12;
+
+      // Dinámica escalonada
+      const velocityScale = Math.max(40, note.velocity - (v * 4));
+
+      voiceNotes.push({
+        id: `h_${trackId}_${note.id}`,
+        pitch: targetMidi,
+        velocity: velocityScale,
+        startTime: note.startTime,
+        duration: note.duration,
+        track: trackId,
+        channel: channel
+      });
+    }
+
+    voices.push({
+      id: trackId,
+      name: `${String(trackId + 1).padStart(2, '0')}_Harmony_${interval}`,
+      channel: channel,
+      notes: voiceNotes
     });
   }
-  return bassNotes;
-}
 
-function generateChords(_melody: NoteEvent[], _key: string): NoteEvent[] {
-  return []; // Lógica de acordes pendiente de expansión
+  return voices;
 }
