@@ -1,12 +1,25 @@
 import { jsPDF } from 'jspdf';
-import { ProjectData } from '../types';
-export function exportToPdf(data: ProjectData): Buffer {
+import type { ProjectData } from '../types';
+
+export function exportToPdf(data: ProjectData): Uint8Array {
   const doc = new jsPDF();
-  doc.setFontSize(18); doc.text('MIDI ENGINE - 16 VOICES HARMONY', 10, 20);
-  doc.setFontSize(12); let y = 40;
+  doc.setFontSize(18);
+  doc.text('MIDI ENGINE - 16 VOICES HARMONY', 10, 20);
+  doc.setFontSize(10);
+  doc.text(`Tempo: ${data.tempo} BPM | Time: ${data.timeSignature[0]}/${data.timeSignature[1]} | Tracks: ${data.tracks.length}`, 10, 30);
+  
+  doc.setFontSize(11);
+  let y = 45;
+
   for (const track of data.tracks) {
-    doc.text(`${track.name}: ${track.notes.length} notes`, 10, y); y += 10;
-    if (y > 280) { doc.addPage(); y = 20; }
+    if (y > 280) {
+      doc.addPage();
+      y = 20;
+    }
+    doc.text(`${track.name}: ${track.notes.length} notes`, 10, y);
+    y += 8;
   }
-  return Buffer.from(doc.output('arraybuffer'));
+
+  const arrayBuffer = doc.output('arraybuffer');
+  return new Uint8Array(arrayBuffer);
 }

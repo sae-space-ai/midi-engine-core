@@ -1,13 +1,11 @@
-import * as Tonal from 'tonal';
-import { ProjectData, TrackData, NoteEvent } from './types';
+import { Note, Scale } from 'tonal';
+import type { ProjectData, TrackData, NoteEvent } from './types';
 
 export function harmonizeProject(data: ProjectData): ProjectData {
   const melodyTrack = data.tracks[0];
-  if (!melodyTrack) return data;
+  if (!melodyTrack || melodyTrack.notes.length === 0) return data;
 
   const key = detectKey(melodyTrack.notes);
-  
-  // Generar las 15 voces de armonía adicionales (Total 16 voces incluyendo melodía)
   const harmonyVoices = generate16VoiceHarmony(melodyTrack.notes, key);
 
   return {
@@ -20,50 +18,56 @@ export function harmonizeProject(data: ProjectData): ProjectData {
 }
 
 function detectKey(notes: NoteEvent[]): string {
-  const strongBeats = notes.filter(n => n.startTime % 4 === 0).map(n => Tonal.Note.pitchClass(Tonal.Note.fromMidi(n.pitch)));
-  const detected = Tonal.Scale.detect(strongBeats);
+  // Obtener pitch classes de las notas en tiempos fuertes
+  const pitchClasses = notes
+    .filter(n => n.startTime % 1 === 0)
+    .map(n => Note.fromMidi(n.pitch));
+  
+  if (pitchClasses.length === 0) return 'C major';
+
+  const detected = Scale.detect(pitchClasses);
   return (detected && detected.length > 0) ? detected[0] : 'C major';
 }
 
 // MOTOR DE 16 VOCES: Genera un arreglo polifónico denso y perfectamente voice-led.
 function generate16VoiceHarmony(melody: NoteEvent[], key: string): TrackData[] {
   const voices: TrackData[] = [];
-  const scaleNotes = Tonal.Scale.get(key).notes;
   
-  // Matriz de intervalos para 15 voces adicionales (desde la 2ª hasta la 16ª voz)
-  // Usa extensiones de acordes (9, 11, 13), duplicaciones octavadas y tensiones controladas.
+  // Matriz de intervalos para 15 voces adicionales
   const intervalPatterns = [
-    '3M', '5P', '7m', '9M', '11A', '13M', // Voces 2-7 (Armonía base extendida)
-    '8P', '10M', '12P', '14m', '16M', '18A', '20M', // Voces 8-14 (Octavas y extensiones superiores)
-    '2M', '4P' // Voces 15-16 (Tensiones superiores y color)
+    '3M', '5P', '7m', '9M', '11A', '13M',           // Voces 2-7
+    '8P', '10M', '12P', '14m', '16M', '18A', '20M', // Voces 8-14
+    '2M', '4P'                                        // Voces 15-16
   ];
 
   for (let v = 0; v < 15; v++) {
     const voiceNotes: NoteEvent[] = [];
     const interval = intervalPatterns[v];
-    const trackId = v + 2; // 0 es melodía, 1 es bypass, empezamos en 2
-    const channel = (trackId) % 16;
+    const trackId = v + 2;
+    const channel = trackId % 16;
 
     for (const note of melody) {
-      const noteName = Tonal.Note.fromMidi(note.pitch);
-      const octave = Math.floor(note.pitch / 12);
+      const noteName = Note.fromMidi(note.pitch);
       
-      // Calcular la nota objetivo usando Tonal
-      const targetNoteName = Tonal.Note.transpose(noteName, interval);
-      let targetMidi = Tonal.Note.midi(targetNoteName);
+      // Transponer la nota por el intervalo
+      const targetNoteName = Note.transpose(noteName, interval);
+      let targetMidi = Note.midi(targetNoteName);
       
       if (targetMidi === null) targetMidi = note.pitch;
       
-      // Ajuste de octava para mantener el registro espectral (Voice Leading)
-      if (v < 6 && targetMidi < 48) targetMidi += 12; // Voces graves no deben ser demasiado graves
-      if (v >= 6 && v < 12 && (targetMidi < 60 || targetMidi > 84)) targetMidi = targetMidi < 60 ? targetMidi + 12 : targetMidi - 12; // Voces medias
-      if (v >= 12 && targetMidi < 72) targetMidi += 12; // Voces agudas
+      // Voice Leading: ajustar octava según el rango de la voz
+      if (v < 6 && targetMidi < 48) targetMidi += 12;
+      if (v >= 6 && v < 12) {
+        if (targetMidi < 60) targetMidi += 12;
+        if (targetMidi > 84) targetMidi -= 12;
+      }
+      if (v >= 12 && targetMidi < 72) targetMidi += 12;
 
-      // Evitar que la nota supere el rango MIDI (127)
+      // Clamp al rango MIDI válido
       while (targetMidi > 127) targetMidi -= 12;
       while (targetMidi < 0) targetMidi += 12;
 
-      // Dinámica escalonada (las voces más lejanas suenan un poco más suave para equilibrar)
+      // Dinámica escalonada
       const velocityScale = Math.max(40, note.velocity - (v * 4));
 
       voiceNotes.push({
@@ -76,6 +80,7 @@ function generate16VoiceHarmony(melody: NoteEvent[], key: string): TrackData[] {
         channel: channel
       });
     }
+
     voices.push({
       id: trackId,
       name: `${String(trackId + 1).padStart(2, '0')}_Harmony_${interval}`,
@@ -83,5 +88,6 @@ function generate16VoiceHarmony(melody: NoteEvent[], key: string): TrackData[] {
       notes: voiceNotes
     });
   }
+
   return voices;
 }
