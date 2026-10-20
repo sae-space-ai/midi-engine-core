@@ -16,6 +16,7 @@ export function EngineCard({ title, description, engineType, accentColor }: Engi
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      console.log(`[Card] File selected for ${engineType}:`, file.name);
       runEngine(file);
     }
   };
@@ -66,25 +67,25 @@ export function EngineCard({ title, description, engineType, accentColor }: Engi
             <div className="stat">
               <span className="stat-label">Notas:</span>
               <span className="stat-value">
-                {result.projectData.tracks.reduce((sum: number, t) => sum + t.notes.length, 0)}
+                {result.projectData.tracks.reduce((sum: number, t: any) => sum + t.notes.length, 0)}
               </span>
             </div>
           </div>
           <div className="download-buttons">
             <button
-              onClick={() => downloadUint8Array(result.midi, `result_${engineType}.mid`, 'audio/midi')}
+              onClick={() => downloadUint8Array(result.files.midi, `result_${engineType}.mid`, 'audio/midi')}
               className="btn-dl"
             >
               MID
             </button>
             <button
-              onClick={() => downloadString(result.musicxml, `result_${engineType}.musicxml`, 'application/xml')}
+              onClick={() => downloadString(result.files.musicxml, `result_${engineType}.musicxml`, 'application/xml')}
               className="btn-dl"
             >
               XML
             </button>
             <button
-              onClick={() => downloadUint8Array(result.pdf, `result_${engineType}.pdf`, 'application/pdf')}
+              onClick={() => downloadUint8Array(result.files.pdf, `result_${engineType}.pdf`, 'application/pdf')}
               className="btn-dl"
             >
               PDF
